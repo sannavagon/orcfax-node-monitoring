@@ -18,3 +18,4 @@ A specific full day
 To ensure accurate data interpretation, please maintain a consistent time format.
 
 We hope this script proves to be a valuable tool for your monitoring needs.
+Complete README documentation
