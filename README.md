@@ -53,3 +53,4 @@ To ensure accurate data interpretation, please maintain a consistent time format
 
 We hope this script proves to be a valuable tool for your monitoring needs.
 
+In analysis_orcfax.sh, it includes a color chart: green for connection, red for no response, and orange for more than one connection in that minute (they may appear because we don't count in the same way and their minute doesn't start with mine, never two in a row in the same column).
