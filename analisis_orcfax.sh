@@ -171,23 +171,23 @@ for MINUTE in $MINUTES; do
             if [[ "$SUCCESSFUL" -gt 0 && "$FAILED" -gt 0 ]]; then
                 echo -n "$(tput setaf 5)🟪$(tput sgr0)" # Purple for both OK and timeout
                 TOTAL_OK_AND_TIMEOUT=$((TOTAL_OK_AND_TIMEOUT + 1))
-                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2))
+                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2)) # Count both OK and timeout
             elif [[ "$FAILED" -gt 1 ]]; then
                 echo -n "$(tput setaf 4)🟦$(tput sgr0)" # Blue for more than one timeout
                 TOTAL_MULTIPLE_TIMEOUT=$((TOTAL_MULTIPLE_TIMEOUT + 1))
-                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2))
+                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2)) # Count multiple timeouts
             elif [[ "$FAILED" -gt 0 ]]; then
                 echo -n "$(tput setaf 1)🟥$(tput sgr0)" # Red for one timeout
                 TOTAL_TIMEOUT=$((TOTAL_TIMEOUT + 1))
-                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 1))
+                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 1)) # Count one timeout
             elif [[ "$SUCCESSFUL" -gt 1 ]]; then
                 echo -n "$(tput setaf 3)🟧$(tput sgr0)" # Orange for more than one successful in the same minute
                 TOTAL_MULTIPLE_OK=$((TOTAL_MULTIPLE_OK + 1))
-                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2))
+                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 2)) # Count multiple OKs
             elif [[ "$SUCCESSFUL" -gt 0 ]]; then
                 echo -n "$(tput setaf 2)🟩$(tput sgr0)" # Green for one successful
                 TOTAL_OK=$((TOTAL_OK + 1))
-                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 1))
+                TOTAL_MESSAGES=$((TOTAL_MESSAGES + 1)) # Count one OK
             else
                 echo -n "⬜" # White for no validations
                 TOTAL_BLANKS=$((TOTAL_BLANKS + 1))
@@ -220,7 +220,7 @@ echo "Total timeout errors (Red): $TOTAL_TIMEOUT"
 echo "Total multiple timeout errors (Blue): $TOTAL_MULTIPLE_TIMEOUT"
 echo "Total OK and timeout responses (Purple): $TOTAL_OK_AND_TIMEOUT"
 echo "Total no activity (White): $TOTAL_BLANKS"
-echo "Total messages processed: $((TOTAL_OK + TOTAL_TIMEOUT + TOTAL_MULTIPLE_OK + TOTAL_MULTIPLE_TIMEOUT + TOTAL_OK_AND_TIMEOUT)) (should match Total messages sent)"
+echo "Total messages processed: $TOTAL_MESSAGES (should match Total messages sent)"
 
 # Count service restarts
 STARTED_COUNT=$(echo "$LOGS" | grep "Started orcfax-collector.service" | wc -l)
