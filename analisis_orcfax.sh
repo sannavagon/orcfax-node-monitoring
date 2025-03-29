@@ -131,7 +131,7 @@ echo ""
 # Count OK responses from the validator in the same minute for multiple pairs
 echo "Pairs that overlapped in the same minute:"
 
-journalctl -u orcfax-collector.service --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null |
+journalctl -u orcfax-collector.service --since "$SINCE" --until "$UNTIL" --no-pager 2>/devnull |
     grep "websocket response: OK" |
     awk '{print substr($1, 1, 16), $NF}' | # Extract EPOCH-MM-DD HH:MM and pair
     sort | uniq |
@@ -139,7 +139,7 @@ journalctl -u orcfax-collector.service --since "$SINCE" --until "$UNTIL" --no-pa
 
 # Detailed visualization of the validation grid
 echo "Validation grid by minute and pair (last hour):"
-echo "Minute               ADA-USD   ADA-BTC   BTC-USD"
+echo "Minute               ADA/USD   ADA/BTC   BTC/USD"
 
 # Get the minutes of the last hour
 MINUTES=$(seq 0 59)
@@ -159,8 +159,10 @@ for MINUTE in $MINUTES; do
             SUCCESSFUL=$(echo "$VALIDATION_PAIR" | grep "OK (" | wc -l)
             FAILED=$(echo "$VALIDATION_PAIR" | grep "wait_for resp timeout" | wc -l)
 
-            if [[ "$FAILED" -gt 0 ]]; then
-                echo -n "$(tput setaf 1)🟥$(tput sgr0)" # Red for failed
+            if [[ "$FAILED" -gt 1 ]]; then
+                echo -n "$(tput setaf 4)🟦$(tput sgr0)" # Blue for more than one timeout
+            elif [[ "$FAILED" -gt 0 ]]; then
+                echo -n "$(tput setaf 1)🟥$(tput sgr0)" # Red for one timeout
             elif [[ "$SUCCESSFUL" -gt 1 ]]; then
                 echo -n "$(tput setaf 3)🟧$(tput sgr0)" # Orange for more than one successful in the same minute
             elif [[ "$SUCCESSFUL" -gt 0 ]]; then
@@ -176,6 +178,15 @@ for MINUTE in $MINUTES; do
 
     echo "" # New line for the next minute
 done
+
+# Legend
+echo ""
+echo "Legend:"
+echo "🟩 Green: OK response from the validator"
+echo "🟧 Orange: More than one successful communication in the same minute"
+echo "🟥 Red: Timeout error"
+echo "🟦 Blue: More than one timeout error in the same minute"
+echo "⬜ White: No activity in the minute"
 
 echo ""
 
