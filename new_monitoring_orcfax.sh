@@ -1,115 +1,164 @@
 #!/bin/bash
 
-# Determine if a specific hour, a full day, or the last hour is requested
-if [ -z "$1" ]; then
-    FECHA=$(date +"%Y-%m-%d")
-    HORA=$(date -d '1 hour ago' +"%H")
-    MODO="hora"
-elif [[ $1 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    FECHA=$1
-    if [ -n "$2" ] && [[ $2 =~ ^[0-9]{2}$ ]]; then
-        HORA=$2
-        MODO="hora"
-    else
-        MODO="dia"
-    fi
+# --- Range selection ---
+if [ $# -eq 0 ]; then
+   SINCE="1 hour ago"
+   RANGE_LABEL=$(date -d "1 hour ago" '+%Y-%m-%d %H:00-%H:59')
+   journalctl --since="$SINCE" -o cat > /tmp/orcfaxlog.txt
+elif [ $# -eq 2 ]; then
+   DAY="$1"
+   HOUR="$2"
+   SINCE="$DAY $HOUR:00:00"
+   UNTIL="$DAY $HOUR:59:59"
+   RANGE_LABEL="$DAY $HOUR:00-$HOUR:59"
+   journalctl --since="$SINCE" --until="$UNTIL" -o cat > /tmp/orcfaxlog.txt
+elif [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+   DAY="$1"
+   SINCE="$DAY 00:00:00"
+   UNTIL="$DAY 23:59:59"
+   RANGE_LABEL="$DAY 00:00-23:59"
+   journalctl --since="$SINCE" --until="$UNTIL" -o cat > /tmp/orcfaxlog.txt
+elif [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}$ ]]; then
+   DAY=$(echo "$1" | cut -d' ' -f1)
+   HOUR=$(echo "$1" | cut -d' ' -f2)
+   SINCE="$DAY $HOUR:00:00"
+   UNTIL="$DAY $HOUR:59:59"
+   RANGE_LABEL="$DAY $HOUR:00-$HOUR:59"
+   journalctl --since="$SINCE" --until="$UNTIL" -o cat > /tmp/orcfaxlog.txt
 else
-    echo "❌ Incorrect format. Use: ./monitoreo_orcfax.sh [YYYY-MM-DD] [HH]"
-    exit 1
+   echo "Usage:"
+   echo "     $0                # last hour"
+   echo "     $0 YYYY-MM-DD     # full day"
+   echo "     $0 YYYY-MM-DD HH  # one hour (two arguments)"
+   echo "     $0 'YYYY-MM-DD HH' # one hour (one argument, in quotes)"
+   exit 1
 fi
 
-# Define the time range for `journalctl`
-if [ "$MODO" = "hora" ]; then
-    SINCE="${FECHA} ${HORA}:00:00"
-    UNTIL="${FECHA} ${HORA}:59:59"
-    echo " Hourly summary (${HORA}:00 - ${HORA}:59 on ${FECHA}):"
-else
-    SINCE="${FECHA} 00:00:00"
-    UNTIL="${FECHA} 23:59:59"
-    echo " Full day summary (${FECHA}):"
-fi
-echo ""
+echo "Log summary for: $RANGE_LABEL"
+echo
 
-# Get logs from `journalctl` according to the time range
-LOGS=$(journalctl -u orcfax-collector.service --since "$SINCE" --until "$UNTIL" --no-pager 2>/dev/null)
-
-# Count errors, excluding irrelevant messages
-ERRORES=$(echo "$LOGS" | grep "ERROR ::" | grep -v "websocket response: OK" | grep -v "websocket wait_for resp timeout" | wc -l)
-echo " Errors found: $ERRORES"
-echo ""
-
-# Show unique error types
-if [ "$ERRORES" -gt 0 ]; then
-    echo " Types of errors found:"
-    echo "$LOGS" | grep "ERROR ::" | grep -v "websocket response: OK" | grep -v "websocket wait_for resp timeout" | awk -F"::" '{print $3}' | sort | uniq -c | sort -nr
-    echo ""
-else
-    echo " No errors found."
-    echo ""
-fi
-
-# Count connections to CEXs
-echo " CEX connections per pair:"
-printf "| %-7s | %-17s |\n" "Pair" "Total Requests"
-echo "|---------|------------------|"
-
-for PAR in "ADA/USD" "ADA/BTC" "BTC/USD"; do
-    TOTAL_SOLICITUDES=$(echo "$LOGS" | grep "compiled URL for $PAR" | wc -l)
-    printf "| %-7s | %-17s |\n" "$PAR" "$TOTAL_SOLICITUDES"
-done
-echo ""
-
-# Show CEX responses per pair
-mostrar_respuestas_cex() {
-    PAR=$1
-    echo "✅ $PAR:"
-    echo "-----------------------------------------"
-    echo "$LOGS" | grep "compiled URL for $PAR" | awk -F' ' '{print $NF}' | awk -F'/' '{print $3}' | sort | uniq -c | while read RESPUESTAS CEX; do
-        TOTAL_SOLICITUDES=$(echo "$LOGS" | grep "compiled URL for $PAR" | grep "$CEX" | wc -l)
-        SIN_RESPUESTA=$((TOTAL_SOLICITUDES - RESPUESTAS))
-        printf "    %-4s %-40s Total: %-4s | No Response: %-4s\n" "$RESPUESTAS" "$CEX" "$TOTAL_SOLICITUDES" "$SIN_RESPUESTA"
-    done
-    echo "-----------------------------------------"
-    echo ""
+awk '
+BEGIN {
+   cycle=0
+   signed=0
+   ok=0
+   timeout=0
+   err_validator=0
+   err_python=0
+   err_other=0
+   example_timeout=""
+   example_validator=""
+   example_python=""
+   example_other=""
+   info_count=0
 }
-
-echo " CEX responses for each pair:"
-for PAR in "ADA/USD" "ADA/BTC" "BTC/USD"; do
-    mostrar_respuestas_cex "$PAR"
-done
-
-# Validator connections
-VALIDADOR_OK=$(echo "$LOGS" | grep "websocket response: OK" | wc -l)
-VALIDADOR_FAIL=$(echo "$LOGS" | grep "websocket wait_for resp timeout" | wc -l)
-TOTAL_ENVIOS=$(echo "$LOGS" | grep "sending message" | wc -l)
-
-if [ "$TOTAL_ENVIOS" -eq 0 ]; then
-    PORCENTAJE_EXITO=0
-else
-    PORCENTAJE_EXITO=$((VALIDADOR_OK * 100 / TOTAL_ENVIOS))
-fi
-
-# Get count of OK responses per pair
-echo " Validator connections:"
-echo "✅ Successful: $VALIDADOR_OK"
-echo "❌ Failed: $VALIDADOR_FAIL"
-echo " Total messages sent: $TOTAL_ENVIOS"
-echo " Success percentage: $PORCENTAJE_EXITO%"
-
-echo ""
-echo " OK responses per pair:"
-echo "$LOGS" | grep "websocket response: OK (" | awk -F"OK \\(" '{print $2}' | awk -F"\\)" '{print $1}' | sort | uniq -c
-
-echo ""
-
-# Count OK responses from the validator in the same minute
-MULTIPLES_PARES=$(echo "$LOGS" | grep "websocket response: OK" | awk '{print $1, $2, $3}' | uniq -c | awk '$1>1' | wc -l)
-echo " Times the validator responded OK more than once in the same minute: $MULTIPLES_PARES"
-echo ""
-
-# Count service restarts
-STARTED_COUNT=$(echo "$LOGS" | grep "Started orcfax-collector.service" | wc -l)
-STOPPED_COUNT=$(echo "$LOGS" | grep "Deactivated successfully" | wc -l)
-
-echo " Service started times: $STARTED_COUNT"
-echo " Service stopped times: $STOPPED_COUNT"
+  /Starting orcfax-collector-once.service/ {
+   if (cycle>0) {
+     # Clasificación PRIORITARIA:
+     if (timeout_in_cycle) {
+       timeout++
+       if (example_timeout=="") example_timeout=timeout_msg
+     } else if (validatorerr_in_cycle) {
+       err_validator++
+       if (example_validator=="") example_validator=validator_msg
+     } else if (pythonerr_in_cycle) {
+       err_python++
+       if (example_python=="") example_python=python_msg
+     } else if (othererr_in_cycle) {
+       err_other++
+       if (example_other=="") example_other=other_msg
+     } else if (signed_in_cycle) {
+       ok++
+     }
+   }
+   cycle++
+   signed_in_cycle=0
+   timeout_in_cycle=0
+   validatorerr_in_cycle=0
+   pythonerr_in_cycle=0
+   othererr_in_cycle=0
+   timeout_msg=""
+   validator_msg=""
+   python_msg=""
+   other_msg=""
+   next
+}
+{
+   if ($0 ~ /sign_with_key\(\)/) signed_in_cycle=1
+   if (tolower($0) ~ /timeout for feeds/) {
+     timeout_in_cycle=1
+     if (example_timeout=="") timeout_msg=$0
+   }
+   if ($0 ~ /unexpected response status code from
+validator|send_data_to_validator/) {
+     validatorerr_in_cycle=1
+     if (example_validator=="") validator_msg=$0
+   }
+   if ($0 ~ /Error parsing|Error retrieving/) {
+     pythonerr_in_cycle=1
+     if (example_python=="") python_msg=$0
+   }
+   # Solo otros errores del collector:
+   if (($0 ~ /error|ERROR|\[ERROR\]|exception/) && \
+       !validatorerr_in_cycle && !pythonerr_in_cycle &&
+!timeout_in_cycle && \
+       ($0 ~ /\.py|collector/)) {
+     othererr_in_cycle=1
+     if (example_other=="") other_msg=$0
+   }
+   # Errores informativos de otros procesos (no collector)
+   if (($0 ~ /error|ERROR|\[ERROR\]|exception/) && \
+       !validatorerr_in_cycle && !pythonerr_in_cycle &&
+!timeout_in_cycle && !othererr_in_cycle && \
+       !($0 ~ /\.py|collector/)) {
+     info_msg[info_count]=$0
+     info_count++
+   }
+}
+END {
+   if (cycle>0) {
+     if (timeout_in_cycle) {
+       timeout++
+       if (example_timeout=="") example_timeout=timeout_msg
+     } else if (validatorerr_in_cycle) {
+       err_validator++
+       if (example_validator=="") example_validator=validator_msg
+     } else if (pythonerr_in_cycle) {
+       err_python++
+       if (example_python=="") example_python=python_msg
+     } else if (othererr_in_cycle) {
+       err_other++
+       if (example_other=="") example_other=other_msg
+     } else if (signed_in_cycle) {
+       ok++
+     }
+   }
+   print "Summary:"
+   print "     Total cycles:", cycle
+   print "     Successful cycles (signed, no errors):", ok
+   print "     Timeout cycles:", timeout
+   print "     Validator error cycles:", err_validator
+   print "     Python error cycles:", err_python
+   print "     Other error cycles (collector only):", err_other
+   print ""
+   print "Error types by affected cycles:"
+   if (timeout > 0) print "     Timeout:",timeout,"(Example: "
+example_timeout ")"
+   if (err_validator > 0) print " Validator:",err_validator,"(Example: "
+example_validator ")"
+   if (err_python > 0) print " Python:",err_python,"(Example: "
+example_python ")"
+   if (err_other > 0) print "     Other
+(collector):",err_other,"(Example: " example_other ")"
+   if (info_count > 0) {
+     print ""
+     print "Informative errors from other processes (ignored for node
+health and restart):"
+     for (k=0;k<info_count;k++) {
+       print "     - " info_msg[k]
+       if (k==4 && info_count>5) { print "     ... and more
+("info_count" total)"; break }
+     }
+   }
+}
+' /tmp/orcfaxlog.txt
