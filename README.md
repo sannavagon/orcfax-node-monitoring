@@ -22,6 +22,7 @@ Last Hour Data:
 
 ./monitoring_orcfax.sh
 This command provides monitoring data for the previous hour.
+
 Specific Hour Data:
 
 ./monitoring_orcfax.sh YYYY-MM-DD HH
